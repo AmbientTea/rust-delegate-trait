@@ -3,7 +3,11 @@ use proc_macro2::Span;
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::parse_macro_input;
+use syn::punctuated::Punctuated;
+use syn::token::Comma;
 use syn::FnArg;
+use syn::GenericParam;
+use syn::Generics;
 use syn::ItemTrait;
 use syn::Receiver;
 use syn::Signature;
@@ -23,19 +27,26 @@ pub fn delegated(
 
 fn delegated_impl(trait_item: &syn::ItemTrait) -> TokenStream {
     let trait_ident = &trait_item.ident;
+    let generics = &trait_item.generics;
+    let Generics {
+        params,
+        where_clause,
+        ..
+    } = &generics;
 
+    let where_clause = (where_clause.clone()).map_or_else(|| Punctuated::new(), |wc| wc.predicates);
     let delegated_trait_ident = Ident::new(
         &format!("Delegated{}", trait_ident.to_string()),
         Span::call_site(),
     );
 
     let item_impls = (trait_item.items.iter().cloned())
-        .map(|item| implement_item(item, &trait_ident, &delegated_trait_ident));
+        .map(|item| implement_item(item, &trait_ident, &delegated_trait_ident, &params));
 
     quote! {
         #trait_item
 
-        pub trait #delegated_trait_ident {
+        pub trait #delegated_trait_ident #generics {
             type DelegateType;
 
             fn delegate(self) -> Self::DelegateType;
@@ -43,9 +54,10 @@ fn delegated_impl(trait_item: &syn::ItemTrait) -> TokenStream {
             fn delegate_ref_mut(&mut self) -> &mut Self::DelegateType;
         }
 
-        impl<T: #delegated_trait_ident> #trait_ident for T
+        impl<Delegated_T: #delegated_trait_ident<#params>, #params> #trait_ident <#params> for Delegated_T
         where
-        <T as #delegated_trait_ident>::DelegateType: #trait_ident
+        <Delegated_T as #delegated_trait_ident<#params>>::DelegateType: #trait_ident<#params>,
+        #where_clause
         {
             #(#item_impls)*
         }
@@ -57,18 +69,21 @@ fn implement_item(
     item: syn::TraitItem,
     trait_ident: &Ident,
     delegated_trait_ident: &Ident,
+    params: &Punctuated<GenericParam, Comma>,
 ) -> TokenStream {
     match item {
-        syn::TraitItem::Fn(TraitItemFn { sig, .. }) => implement_fn(sig, delegated_trait_ident),
+        syn::TraitItem::Fn(TraitItemFn { sig, .. }) => {
+            implement_fn(sig, delegated_trait_ident, params)
+        }
 
         syn::TraitItem::Const(TraitItemConst { ident, ty, .. }) => quote! {
             const #ident: #ty =
-            <<T as #delegated_trait_ident>::DelegateType as #trait_ident>::#ident;
+            <<Delegated_T as #delegated_trait_ident<#params>>::DelegateType as #trait_ident<#params>>::#ident;
         },
 
         syn::TraitItem::Type(TraitItemType { ident, .. }) => quote! {
             type #ident =
-                <<T as #delegated_trait_ident>::DelegateType as #trait_ident>::#ident;
+                <<Delegated_T as #delegated_trait_ident<#params>>::DelegateType as #trait_ident<#params>>::#ident;
         },
 
         syn::TraitItem::Macro(_) => quote!(compile_error!(
@@ -79,7 +94,12 @@ fn implement_item(
     }
 }
 
-fn implement_fn(sig: Signature, delegated_trait_ident: &Ident) -> TokenStream {
+fn implement_fn(
+    sig: Signature,
+    delegated_trait_ident: &Ident,
+
+    params: &Punctuated<GenericParam, Comma>,
+) -> TokenStream {
     let fn_ident = &sig.ident;
     let mut inputs: Vec<_> = sig.inputs.iter().collect();
 
@@ -96,7 +116,7 @@ fn implement_fn(sig: Signature, delegated_trait_ident: &Ident) -> TokenStream {
             _ => quote!(self.delegate().#fn_ident),
         }
     } else {
-        quote!(<T as #delegated_trait_ident>::DelegateType::#fn_ident)
+        quote!(<Delegated_T as #delegated_trait_ident<#params>>::DelegateType::#fn_ident)
     };
 
     let inputs = inputs.into_iter().map(|input| match input {

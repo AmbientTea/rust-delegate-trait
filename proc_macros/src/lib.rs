@@ -5,6 +5,7 @@ use quote::quote;
 use syn::parse_macro_input;
 use syn::FnArg;
 use syn::ItemTrait;
+use syn::Receiver;
 use syn::Signature;
 use syn::TraitItemConst;
 use syn::TraitItemFn;
@@ -58,7 +59,7 @@ fn implement_item(
     delegated_trait_ident: &Ident,
 ) -> TokenStream {
     match item {
-        syn::TraitItem::Fn(TraitItemFn { sig, .. }) => implement_fn(sig),
+        syn::TraitItem::Fn(TraitItemFn { sig, .. }) => implement_fn(sig, delegated_trait_ident),
 
         syn::TraitItem::Const(TraitItemConst { ident, ty, .. }) => quote! {
             const #ident: #ty =
@@ -78,18 +79,24 @@ fn implement_item(
     }
 }
 
-fn implement_fn(sig: Signature) -> TokenStream {
+fn implement_fn(sig: Signature, delegated_trait_ident: &Ident) -> TokenStream {
     let fn_ident = &sig.ident;
-    let inputs: Vec<_> = sig.inputs.iter().collect();
-    let Some((FnArg::Receiver(receiver), inputs)) = inputs.split_first() else {
-        let error_msg = format!("Trait function {fn_ident} must have a `self` receiver.");
-        return quote!(compile_error(#error_msg));
-    };
+    let mut inputs: Vec<_> = sig.inputs.iter().collect();
 
-    let delegate = match (&receiver.reference, &receiver.mutability) {
-        (Some(_), Some(_)) => quote!(delegate_ref_mut()),
-        (Some(_), None) => quote!(delegate_ref()),
-        _ => quote!(delegate()),
+    let delegate = if let Some(FnArg::Receiver(Receiver {
+        reference,
+        mutability,
+        ..
+    })) = inputs.first()
+    {
+        inputs.remove(0);
+        match (reference.is_some(), mutability.is_some()) {
+            (true, true) => quote!(self.delegate_ref_mut().#fn_ident),
+            (true, false) => quote!(self.delegate_ref().#fn_ident),
+            _ => quote!(self.delegate().#fn_ident),
+        }
+    } else {
+        quote!(<T as #delegated_trait_ident>::DelegateType::#fn_ident)
     };
 
     let inputs = inputs.into_iter().map(|input| match input {
@@ -99,7 +106,7 @@ fn implement_fn(sig: Signature) -> TokenStream {
 
     quote! {
         #sig {
-            self.#delegate.#fn_ident(#(#inputs)*)
+            #delegate(#(#inputs)*)
         }
     }
 }

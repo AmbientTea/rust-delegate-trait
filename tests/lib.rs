@@ -6,6 +6,9 @@ mod base_case {
         type InnerType: Copy;
         const CONST: Self::InnerType;
 
+        fn static_procedure();
+        fn static_function(str: String) -> String;
+
         fn value_procedure(self);
         fn value_function(self, str: &str) -> String;
         fn ref_procedure(&self);
@@ -20,6 +23,11 @@ mod base_case {
     impl TestTrait for A {
         type InnerType = u32;
         const CONST: Self::InnerType = 42;
+
+        fn static_procedure() {}
+        fn static_function(str: String) -> String {
+            format!("Hello: {str}")
+        }
 
         fn value_procedure(self) {}
         fn value_function(self, str: &str) -> String {
@@ -51,6 +59,12 @@ mod base_case {
         assert_eq!(b.clone().value_function("abc"), "value function: abc");
         assert_eq!(b.ref_function("abc"), "ref function: abc");
         assert_eq!(b.ref_mut_function("abc"), "ref mut function: abc");
+    }
+
+    #[test]
+    fn delegated_static_calls() {
+        B::static_procedure();
+        assert_eq!(B::static_function("abc".into()), "Hello: abc");
     }
 
     #[test]

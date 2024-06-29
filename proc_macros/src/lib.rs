@@ -1,19 +1,12 @@
-use proc_macro2::Ident;
-use proc_macro2::Span;
-use proc_macro2::TokenStream;
+use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
-use syn::parse_macro_input;
 use syn::punctuated::Punctuated;
 use syn::token::Comma;
-use syn::FnArg;
-use syn::GenericParam;
-use syn::Generics;
-use syn::ItemTrait;
-use syn::Receiver;
-use syn::Signature;
-use syn::TraitItemConst;
-use syn::TraitItemFn;
-use syn::TraitItemType;
+use syn::{parse_macro_input, PatType, TypePath};
+use syn::{
+    FnArg, GenericParam, Generics, ItemTrait, Receiver, Signature, TraitItemConst, TraitItemFn,
+    TraitItemType, Type,
+};
 
 #[proc_macro_attribute]
 pub fn delegated(
@@ -103,7 +96,7 @@ fn implement_fn(
     let fn_ident = &sig.ident;
     let mut inputs: Vec<_> = sig.inputs.iter().collect();
 
-    let delegate = if let Some(FnArg::Receiver(Receiver {
+    let delegated_call = if let Some(FnArg::Receiver(Receiver {
         reference,
         mutability,
         ..
@@ -120,13 +113,31 @@ fn implement_fn(
     };
 
     let inputs = inputs.into_iter().map(|input| match input {
-        syn::FnArg::Typed(arg) => arg.pat.clone(),
-        syn::FnArg::Receiver(_) => unreachable!(),
+        FnArg::Typed(PatType { pat, ty, .. }) => match type_is_self(ty.as_ref()) {
+            Some((true, false)) => quote!(#pat.delegate_ref()),
+            Some((true, true)) => quote!(#pat.delegate_ref_mut()),
+            Some((false, false)) => quote!(#pat.delegate()),
+            _ => quote!(#pat),
+        },
+        FnArg::Receiver(_) => unreachable!(),
     });
 
     quote! {
         #sig {
-            #delegate(#(#inputs)*)
+            #delegated_call(#(#inputs)*)
         }
     }
+}
+
+fn type_is_self(ty: &Type) -> Option<(bool, bool)> {
+    match ty {
+        Type::Reference(reff) if type_is_self(reff.elem.as_ref()).is_some() => {
+            Some((true, reff.mutability.is_some()))
+        }
+        Type::Path(path) if path_is_self(&path) => Some((false, false)),
+        _ => None,
+    }
+}
+fn path_is_self(path: &TypePath) -> bool {
+    (path.path.segments.first().iter()).all(|seg| seg.ident.to_string() == "Self")
 }

@@ -182,3 +182,28 @@ mod generic_traits {
         assert_eq!(B::CONST, 100)
     }
 }
+
+mod self_as_argument {
+    use delegate_trait::*;
+
+    #[delegated]
+    pub trait TestTrait {
+        fn consume_self(s: Self);
+        fn consume_self_ref(s: &Self);
+        fn consume_self_ref_mut(s: &mut Self);
+    }
+
+    pub struct A;
+
+    impl TestTrait for A {
+        fn consume_self(_s: Self) {}
+        fn consume_self_ref(_s: &Self) {}
+        fn consume_self_ref_mut(_s: &mut Self) {}
+    }
+
+    pub struct B {
+        a: A,
+    }
+
+    delegate_to_field!(a: A as DelegatedTestTrait for B);
+}

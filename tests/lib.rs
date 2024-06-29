@@ -51,14 +51,19 @@ mod base_case {
     delegate_to_field!(a: A as DelegatedTestTrait for B);
 
     #[test]
-    fn delegated_calls_work() {
+    fn delegated_procedures() {
         let mut b = B { a: A };
-        b.clone().value_procedure();
         b.ref_procedure();
         b.ref_mut_procedure();
-        assert_eq!(b.clone().value_function("abc"), "value function: abc");
+        b.value_procedure();
+    }
+
+    #[test]
+    fn delegated_functions() {
+        let mut b = B { a: A };
         assert_eq!(b.ref_function("abc"), "ref function: abc");
         assert_eq!(b.ref_mut_function("abc"), "ref mut function: abc");
+        assert_eq!(b.value_function("abc"), "value function: abc");
     }
 
     #[test]

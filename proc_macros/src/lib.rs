@@ -4,8 +4,7 @@ use syn::punctuated::Punctuated;
 use syn::token::Comma;
 use syn::{parse_macro_input, PatType, TypePath};
 use syn::{
-    FnArg, GenericParam, Generics, ItemTrait, Receiver, Signature, TraitItemConst, TraitItemFn,
-    TraitItemType, Type,
+    FnArg, GenericParam, ItemTrait, Signature, TraitItemConst, TraitItemFn, TraitItemType, Type,
 };
 
 #[proc_macro_attribute]
@@ -21,13 +20,10 @@ pub fn delegated(
 fn delegated_impl(trait_item: &syn::ItemTrait) -> TokenStream {
     let trait_ident = &trait_item.ident;
     let generics = &trait_item.generics;
-    let Generics {
-        params,
-        where_clause,
-        ..
-    } = &generics;
+    let params = &generics.params;
+    let where_clause =
+        (generics.where_clause.clone()).map_or_else(|| Punctuated::new(), |wc| wc.predicates);
 
-    let where_clause = (where_clause.clone()).map_or_else(|| Punctuated::new(), |wc| wc.predicates);
     let delegated_trait_ident = Ident::new(
         &format!("Delegated{}", trait_ident.to_string()),
         Span::call_site(),
@@ -47,10 +43,14 @@ fn delegated_impl(trait_item: &syn::ItemTrait) -> TokenStream {
             fn delegate_ref_mut(&mut self) -> &mut Self::DelegateType;
         }
 
-        impl<Delegated_T: #delegated_trait_ident<#params>, #params> #trait_ident <#params> for Delegated_T
+        impl<
+            Delegated_T: #delegated_trait_ident<#params>,
+            #params
+        >
+            #trait_ident <#params> for Delegated_T
         where
-        <Delegated_T as #delegated_trait_ident<#params>>::DelegateType: #trait_ident<#params>,
-        #where_clause
+            <Delegated_T as #delegated_trait_ident<#params>>::DelegateType: #trait_ident<#params>,
+            #where_clause
         {
             #(#item_impls)*
         }
@@ -71,7 +71,7 @@ fn implement_item(
 
         syn::TraitItem::Const(TraitItemConst { ident, ty, .. }) => quote! {
             const #ident: #ty =
-            <<Delegated_T as #delegated_trait_ident<#params>>::DelegateType as #trait_ident<#params>>::#ident;
+                <<Delegated_T as #delegated_trait_ident<#params>>::DelegateType as #trait_ident<#params>>::#ident;
         },
 
         syn::TraitItem::Type(TraitItemType { ident, .. }) => quote! {
@@ -82,7 +82,9 @@ fn implement_item(
         syn::TraitItem::Macro(_) => quote!(compile_error!(
             "delegate-trait doesn't support macros as trait items"
         )),
+
         syn::TraitItem::Verbatim(verbatim) => verbatim,
+
         other => quote!(#other),
     }
 }
@@ -90,54 +92,75 @@ fn implement_item(
 fn implement_fn(
     sig: Signature,
     delegated_trait_ident: &Ident,
-
     params: &Punctuated<GenericParam, Comma>,
 ) -> TokenStream {
     let fn_ident = &sig.ident;
     let mut inputs: Vec<_> = sig.inputs.iter().collect();
 
-    let delegated_call = if let Some(FnArg::Receiver(Receiver {
-        reference,
-        mutability,
-        ..
-    })) = inputs.first()
-    {
-        inputs.remove(0);
-        match (reference.is_some(), mutability.is_some()) {
-            (true, true) => quote!(self.delegate_ref_mut().#fn_ident),
-            (true, false) => quote!(self.delegate_ref().#fn_ident),
-            _ => quote!(self.delegate().#fn_ident),
+    let delegated_fn = match inputs.first().and_then(|inp| SelfArg::try_from_arg(inp)) {
+        None => quote!(<Delegated_T as #delegated_trait_ident<#params>>::DelegateType::#fn_ident),
+        Some(self_arg) => {
+            inputs.remove(0);
+            match self_arg {
+                SelfArg::Value => quote!(self.delegate().#fn_ident),
+                SelfArg::Ref => quote!(self.delegate_ref().#fn_ident),
+                SelfArg::MutRef => quote!(self.delegate_ref_mut().#fn_ident),
+            }
         }
-    } else {
-        quote!(<Delegated_T as #delegated_trait_ident<#params>>::DelegateType::#fn_ident)
     };
 
     let inputs = inputs.into_iter().map(|input| match input {
-        FnArg::Typed(PatType { pat, ty, .. }) => match type_is_self(ty.as_ref()) {
-            Some((true, false)) => quote!(#pat.delegate_ref()),
-            Some((true, true)) => quote!(#pat.delegate_ref_mut()),
-            Some((false, false)) => quote!(#pat.delegate()),
-            _ => quote!(#pat),
+        FnArg::Typed(PatType { pat, ty, .. }) => match SelfArg::try_from_type(ty.as_ref()) {
+            Some(SelfArg::Ref) => quote!(#pat.delegate_ref()),
+            Some(SelfArg::MutRef) => quote!(#pat.delegate_ref_mut()),
+            Some(SelfArg::Value) => quote!(#pat.delegate()),
+            None => quote!(#pat),
         },
         FnArg::Receiver(_) => unreachable!(),
     });
 
     quote! {
         #sig {
-            #delegated_call(#(#inputs)*)
+            #delegated_fn(#(#inputs)*)
         }
     }
 }
 
-fn type_is_self(ty: &Type) -> Option<(bool, bool)> {
-    match ty {
-        Type::Reference(reff) if type_is_self(reff.elem.as_ref()).is_some() => {
-            Some((true, reff.mutability.is_some()))
-        }
-        Type::Path(path) if path_is_self(&path) => Some((false, false)),
-        _ => None,
-    }
-}
 fn path_is_self(path: &TypePath) -> bool {
     (path.path.segments.first().iter()).all(|seg| seg.ident.to_string() == "Self")
+}
+
+enum SelfArg {
+    Value,
+    Ref,
+    MutRef,
+}
+
+impl SelfArg {
+    pub fn new(isref: bool, ismut: bool) -> Self {
+        match (isref, ismut) {
+            (true, true) => Self::MutRef,
+            (true, false) => Self::Ref,
+            _ => Self::Value,
+        }
+    }
+    fn try_from_type(ty: &Type) -> Option<Self> {
+        match ty {
+            Type::Reference(reff) if Self::try_from_type(reff.elem.as_ref()).is_some() => {
+                Some(SelfArg::new(true, reff.mutability.is_some()))
+            }
+            Type::Path(path) if path_is_self(&path) => Some(SelfArg::new(false, false)),
+            _ => None,
+        }
+    }
+
+    fn try_from_arg(arg: &FnArg) -> Option<Self> {
+        match arg {
+            FnArg::Receiver(recv) => Some(Self::new(
+                recv.reference.is_some(),
+                recv.mutability.is_some(),
+            )),
+            _ => None,
+        }
+    }
 }

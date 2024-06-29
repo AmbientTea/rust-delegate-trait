@@ -2,7 +2,7 @@ pub use delegate_trait_proc_macros::delegated;
 
 #[macro_export]
 macro_rules! delegate_to_field {
-    ($field:ident: $fty:ty as $tr:ident $(<$($type:ty)+>)? for $struct:ty) => {
+    ($field:tt: $fty:ty as $tr:ident $(<$($type:ty)+>)? for $struct:ty) => {
         impl $tr $(<$($type)+>)? for $struct {
             type DelegateType = $fty;
             fn delegate(self) -> $fty {

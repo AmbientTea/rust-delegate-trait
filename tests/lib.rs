@@ -230,3 +230,17 @@ mod supertraits {
 
     delegate_to_field!(a: A as DelegatedTestTrait for B);
 }
+
+mod tuple_structs {
+    use delegate_trait::*;
+
+    #[delegated]
+    pub trait TestTrait {}
+
+    pub struct A;
+    impl TestTrait for A {}
+
+    pub struct B(A);
+
+    delegate_to_field!(0: A as DelegatedTestTrait for B);
+}

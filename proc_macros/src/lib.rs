@@ -1,3 +1,5 @@
+use proc_macro2::Ident;
+use proc_macro2::Span;
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::parse_macro_input;
@@ -16,18 +18,29 @@ pub fn delegated(
 
 fn delegated_impl(def: &syn::ItemTrait) -> TokenStream {
     let trait_ident = &def.ident;
-    let item_impls = def
-        .items
-        .iter()
-        .cloned()
-        .map(|item| implement_item(item, &def));
+
+    let delegated_trait_ident = Ident::new(
+        &format!("Delegated{}", trait_ident.to_string()),
+        Span::call_site(),
+    );
+
+    let item_impls = (def.items.iter().cloned())
+        .map(|item| implement_item(item, &def, delegated_trait_ident.clone()));
 
     quote! {
         #def
 
-        impl<T: Delegated<dyn #trait_ident>> #trait_ident for T
+        pub trait #delegated_trait_ident {
+            type DelegateType;
+
+            fn delegate(self) -> Self::DelegateType;
+            fn delegate_ref(&self) -> &Self::DelegateType;
+            fn delegate_ref_mut(&mut self) -> &mut Self::DelegateType;
+        }
+
+        impl<T: #delegated_trait_ident> #trait_ident for T
         where
-            <T as Delegated<dyn #trait_ident>>::DelegateType: #trait_ident
+        <T as #delegated_trait_ident>::DelegateType: #trait_ident
         {
             #(#item_impls)*
         }
@@ -35,15 +48,19 @@ fn delegated_impl(def: &syn::ItemTrait) -> TokenStream {
     .into()
 }
 
-fn implement_item(item: syn::TraitItem, _def: &syn::ItemTrait) -> TokenStream {
+fn implement_item(
+    item: syn::TraitItem,
+    def: &syn::ItemTrait,
+    delegated_trait_ident: Ident,
+) -> TokenStream {
     let implementation = match item {
         syn::TraitItem::Fn(trait_item_fn) => implement_fn(trait_item_fn),
-        syn::TraitItem::Const(_) => quote!(compile_error!(
-            "delegate-trait doesn't support constants as trait items"
-        )),
-        syn::TraitItem::Type(_) => quote!(compile_error!(
-            "delegate-trait doesn't support types as trait items"
-        )),
+        syn::TraitItem::Const(trait_item_const) => {
+            implement_const(trait_item_const, def, delegated_trait_ident)
+        }
+        syn::TraitItem::Type(trait_item_type) => {
+            implement_type(trait_item_type, def, delegated_trait_ident)
+        }
         syn::TraitItem::Macro(_) => quote!(compile_error!(
             "delegate-trait doesn't support macros as trait items"
         )),
@@ -78,5 +95,33 @@ fn implement_fn(item_fn: syn::TraitItemFn) -> TokenStream {
         #sig {
             self.#delegate.#fn_name(#(#inputs)*)
         }
+    }
+}
+
+fn implement_const(
+    item: syn::TraitItemConst,
+    def: &syn::ItemTrait,
+    delegated_trait_ident: Ident,
+) -> TokenStream {
+    let const_name = item.ident;
+    let const_type = item.ty;
+    let trait_name = &def.ident;
+    quote! {
+        const #const_name: #const_type =
+        <<T as #delegated_trait_ident>::DelegateType as #trait_name>::#const_name;
+    }
+}
+
+fn implement_type(
+    item: syn::TraitItemType,
+    def: &syn::ItemTrait,
+    delegated_trait_ident: Ident,
+) -> TokenStream {
+    let type_name = item.ident;
+    let trait_name = &def.ident;
+
+    quote! {
+        type #type_name =
+            <<T as #delegated_trait_ident>::DelegateType as #trait_name>::#type_name;
     }
 }

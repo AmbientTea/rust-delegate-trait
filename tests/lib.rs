@@ -3,6 +3,9 @@ mod base_case {
 
     #[delegated]
     pub trait TestTrait {
+        type InnerType: Copy;
+        const CONST: Self::InnerType;
+
         fn value_procedure(self);
         fn value_function(self, str: &str) -> String;
         fn ref_procedure(&self);
@@ -15,6 +18,9 @@ mod base_case {
     pub struct A;
 
     impl TestTrait for A {
+        type InnerType = u32;
+        const CONST: Self::InnerType = 42;
+
         fn value_procedure(self) {}
         fn value_function(self, str: &str) -> String {
             format!("value function: {str}")
@@ -34,7 +40,7 @@ mod base_case {
         a: A,
     }
 
-    delegate_to_field!(a: A as TestTrait for B);
+    delegate_to_field!(a: A as DelegatedTestTrait for B);
 
     #[test]
     fn delegated_calls_work() {
@@ -45,5 +51,10 @@ mod base_case {
         assert_eq!(b.clone().value_function("abc"), "value function: abc");
         assert_eq!(b.ref_function("abc"), "ref function: abc");
         assert_eq!(b.ref_mut_function("abc"), "ref mut function: abc");
+    }
+
+    #[test]
+    fn delegated_constant() {
+        assert_eq!(B::CONST, 42)
     }
 }

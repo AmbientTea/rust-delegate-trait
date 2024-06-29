@@ -4,10 +4,4 @@ version = "0.0.1"
 edition = "2021"
 
 [dependencies]
-delegate-trait-proc-macros = { path = "proc_macros", optional = true }
-
-[features]
-default = ["macros"]
-macros = [
-    "delegate-trait-proc-macros"
-]
+delegate-trait-proc-macros = { path = "proc_macros" }

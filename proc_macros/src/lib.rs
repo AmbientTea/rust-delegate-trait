@@ -21,6 +21,12 @@ fn delegated_impl(trait_item: &syn::ItemTrait) -> TokenStream {
     let trait_ident = &trait_item.ident;
     let generics = &trait_item.generics;
     let params = &generics.params;
+    let supertraits = &trait_item.supertraits;
+    let (plus_supertraits, colon_supertraits) = if !supertraits.is_empty() {
+        (quote!(+ #supertraits), quote!(: #supertraits))
+    } else {
+        (quote!(), quote!())
+    };
     let where_clause =
         (generics.where_clause.clone()).map_or_else(|| Punctuated::new(), |wc| wc.predicates);
 
@@ -36,7 +42,7 @@ fn delegated_impl(trait_item: &syn::ItemTrait) -> TokenStream {
         #trait_item
 
         pub trait #delegated_trait_ident #generics {
-            type DelegateType;
+            type DelegateType #colon_supertraits;
 
             fn delegate(self) -> Self::DelegateType;
             fn delegate_ref(&self) -> &Self::DelegateType;
@@ -44,12 +50,12 @@ fn delegated_impl(trait_item: &syn::ItemTrait) -> TokenStream {
         }
 
         impl<
-            Delegated_T: #delegated_trait_ident<#params>,
+            Delegated_T: #delegated_trait_ident<#params> #plus_supertraits,
             #params
         >
             #trait_ident <#params> for Delegated_T
         where
-            <Delegated_T as #delegated_trait_ident<#params>>::DelegateType: #trait_ident<#params>,
+            <Delegated_T as #delegated_trait_ident<#params>>::DelegateType: #trait_ident<#params> #plus_supertraits,
             #where_clause
         {
             #(#item_impls)*

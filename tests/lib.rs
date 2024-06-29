@@ -207,3 +207,26 @@ mod self_as_argument {
 
     delegate_to_field!(a: A as DelegatedTestTrait for B);
 }
+
+mod supertraits {
+    use delegate_trait::*;
+
+    #[delegated]
+    pub trait TestTrait: Clone + Sync {
+        fn do_something(&self);
+    }
+
+    #[derive(Clone)]
+    pub struct A {
+        pub i: u32,
+    }
+    impl TestTrait for A {
+        fn do_something(&self) {}
+    }
+
+    pub struct B {
+        a: A,
+    }
+
+    delegate_to_field!(a: A as DelegatedTestTrait for B);
+}

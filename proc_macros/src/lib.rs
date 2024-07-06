@@ -2,7 +2,7 @@ use proc_macro2::{Ident, Span, TokenStream};
 use quote::quote;
 use syn::punctuated::Punctuated;
 use syn::token::Comma;
-use syn::{parse_macro_input, PatType, TypePath};
+use syn::{parse_macro_input, Index, ItemStruct, PatType, Path, TypePath};
 use syn::{
     FnArg, GenericParam, ItemTrait, Signature, TraitItemConst, TraitItemFn, TraitItemType, Type,
 };
@@ -169,4 +169,53 @@ impl SelfArg {
             _ => None,
         }
     }
+}
+
+#[proc_macro_derive(Delegating, attributes(delegate))]
+pub fn delegating(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let item = parse_macro_input!(input as ItemStruct);
+
+    delegating_impl(&item).into()
+}
+
+fn delegating_impl(struct_item: &syn::ItemStruct) -> TokenStream {
+    let struct_name = &struct_item.ident;
+    let mut delegates = vec![];
+
+    for (index, field) in struct_item.fields.iter().enumerate() {
+        let index = Index::from(index);
+        let field_ident = field.ident.clone().map_or(quote!(#index), |id| quote!(#id));
+        let field_type = &field.ty;
+
+        for attr in field.attrs.iter() {
+            if attr.path().is_ident("delegate") {
+                let delegatees = attr
+                    .parse_args_with(Punctuated::<Path, Comma>::parse_terminated)
+                    .expect("delegate attribute arguments should be paths");
+
+                for delegatee in delegatees {
+                    delegates.push(quote! {
+                        impl #delegatee for #struct_name {
+                            type DelegateType = #field_type;
+                            fn delegate(self) -> Self::DelegateType {
+                                self.#field_ident
+                            }
+                            fn delegate_ref(&self) -> &Self::DelegateType {
+                                &self.#field_ident
+                            }
+                            fn delegate_ref_mut(&mut self) -> &mut Self::DelegateType {
+                                &mut self.#field_ident
+                            }
+
+                        }
+                    })
+                }
+            }
+        }
+    }
+
+    quote! {
+        #(#delegates)*
+    }
+    .into()
 }

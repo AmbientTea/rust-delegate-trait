@@ -43,12 +43,11 @@ mod base_case {
         }
     }
 
-    #[derive(Clone)]
+    #[derive(Clone, Delegating)]
     pub struct B {
+        #[delegate(DelegatedTestTrait)]
         a: A,
     }
-
-    delegate_to_field!(a: A as DelegatedTestTrait for B);
 
     #[test]
     fn delegated_procedures() {
@@ -141,10 +140,11 @@ mod generic_traits {
         }
     }
 
+    #[derive(Delegating)]
     pub struct B {
+        #[delegate(DelegatedTestTrait<u32>)]
         a: A,
     }
-    delegate_to_field!(a: A as DelegatedTestTrait<u32> for B);
 
     #[test]
     fn generic_field_access() {
@@ -201,11 +201,11 @@ mod self_as_argument {
         fn consume_self_ref_mut(_s: &mut Self) {}
     }
 
+    #[derive(Delegating)]
     pub struct B {
+        #[delegate(DelegatedTestTrait)]
         a: A,
     }
-
-    delegate_to_field!(a: A as DelegatedTestTrait for B);
 }
 
 mod supertraits {
@@ -224,11 +224,11 @@ mod supertraits {
         fn do_something(&self) {}
     }
 
+    #[derive(Delegating)]
     pub struct B {
+        #[delegate(DelegatedTestTrait)]
         a: A,
     }
-
-    delegate_to_field!(a: A as DelegatedTestTrait for B);
 }
 
 mod tuple_structs {
@@ -240,7 +240,83 @@ mod tuple_structs {
     pub struct A;
     impl TestTrait for A {}
 
-    pub struct B(A);
+    #[derive(Delegating)]
+    pub struct B(#[delegate(DelegatedTestTrait)] A);
+}
 
-    delegate_to_field!(0: A as DelegatedTestTrait for B);
+mod delegating_macro {
+    use delegate_trait::*;
+
+    #[delegated]
+    pub trait TestTrait<InnerType> {
+        const CONST: InnerType;
+
+        fn static_procedure();
+        fn static_function(str: String) -> String;
+
+        fn value_procedure(self);
+        fn value_function(self, str: &str) -> String;
+        fn ref_procedure(&self);
+        fn ref_function(&self, str: &str) -> String;
+        fn ref_mut_procedure(&mut self);
+        fn ref_mut_function(&mut self, str: &str) -> String;
+    }
+
+    #[derive(Clone)]
+    pub struct A;
+
+    impl TestTrait<u32> for A {
+        const CONST: u32 = 42;
+
+        fn static_procedure() {}
+        fn static_function(str: String) -> String {
+            format!("Hello: {str}")
+        }
+
+        fn value_procedure(self) {}
+        fn value_function(self, str: &str) -> String {
+            format!("value function: {str}")
+        }
+        fn ref_procedure(&self) {}
+        fn ref_function(&self, str: &str) -> String {
+            format!("ref function: {str}")
+        }
+        fn ref_mut_procedure(&mut self) {}
+        fn ref_mut_function(&mut self, str: &str) -> String {
+            format!("ref mut function: {str}")
+        }
+    }
+
+    #[derive(Clone, Delegating)]
+    pub struct B {
+        #[delegate(crate::delegating_macro::DelegatedTestTrait<u32>)]
+        a: A,
+    }
+
+    #[test]
+    fn delegated_procedures() {
+        let mut b = B { a: A };
+        b.ref_procedure();
+        b.ref_mut_procedure();
+        b.value_procedure();
+    }
+
+    #[test]
+    fn delegated_functions() {
+        let mut b = B { a: A };
+        assert_eq!(b.ref_function("abc"), "ref function: abc");
+        assert_eq!(b.ref_mut_function("abc"), "ref mut function: abc");
+        assert_eq!(b.value_function("abc"), "value function: abc");
+    }
+
+    #[test]
+    fn delegated_static_calls() {
+        B::static_procedure();
+        assert_eq!(B::static_function("abc".into()), "Hello: abc");
+    }
+
+    #[test]
+    fn delegated_constant() {
+        assert_eq!(B::CONST, 42)
+    }
 }
